@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -33,10 +33,12 @@ import {
   Upload,
   Users,
   TrendingUp,
+  Loader2,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { getCustomers, addCustomer, searchCustomers } from "@/lib/data"
+import { getCustomersList, createCustomer, searchCustomersByTerm } from "@/lib/database-operations"
 import { formatCurrency, formatDate, getStatusColor } from "@/lib/utils"
+import type { Customer } from "@/lib/types"
 
 export default function CustomersPage() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -44,24 +46,58 @@ export default function CustomersPage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [selectedCustomerType, setSelectedCustomerType] = useState<"individual" | "company">("individual")
-  const [customers, setCustomers] = useState(getCustomers())
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isCreating, setIsCreating] = useState(false)
   const { toast } = useToast()
 
-  const filteredCustomers = searchTerm
-    ? searchCustomers(searchTerm).filter((customer) => {
-        const matchesType = customerTypeFilter === "all" || customer.customerType === customerTypeFilter
-        const matchesStatus = statusFilter === "all" || customer.status === statusFilter
-        return matchesType && matchesStatus
-      })
-    : customers.filter((customer) => {
-        const matchesType = customerTypeFilter === "all" || customer.customerType === customerTypeFilter
-        const matchesStatus = statusFilter === "all" || customer.status === statusFilter
-        return matchesType && matchesStatus
-      })
+  // Load customers data
+  useEffect(() => {
+    loadCustomers()
+  }, [])
 
-  const handleAddCustomer = (formData: FormData) => {
+  const loadCustomers = async () => {
     try {
-      const newCustomer = addCustomer({
+      setIsLoading(true)
+      const data = await getCustomersList()
+      setCustomers(data)
+    } catch (error) {
+      console.error("Error loading customers:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load customers data",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleSearch = async (term: string) => {
+    setSearchTerm(term)
+    if (term.trim()) {
+      try {
+        const results = await searchCustomersByTerm(term)
+        setCustomers(results)
+      } catch (error) {
+        console.error("Error searching customers:", error)
+      }
+    } else {
+      loadCustomers()
+    }
+  }
+
+  const filteredCustomers = customers.filter((customer) => {
+    const matchesType = customerTypeFilter === "all" || customer.customerType === customerTypeFilter
+    const matchesStatus = statusFilter === "all" || customer.status === statusFilter
+    return matchesType && matchesStatus
+  })
+
+  const handleAddCustomer = async (formData: FormData) => {
+    try {
+      setIsCreating(true)
+
+      const customerData = {
         customerType: selectedCustomerType,
         name: formData.get("name") as string,
         companyName: selectedCustomerType === "company" ? (formData.get("companyName") as string) : undefined,
@@ -79,21 +115,28 @@ export default function CustomersPage() {
         postalCode: formData.get("postalCode") as string,
         creditLimit: Number.parseFloat(formData.get("creditLimit") as string) || 0,
         notes: (formData.get("notes") as string) || undefined,
-      })
+      }
 
-      setCustomers(getCustomers()) // Refresh the customers list
-      setIsAddDialogOpen(false)
+      const newCustomer = await createCustomer(customerData)
 
-      toast({
-        title: "Customer Added Successfully",
-        description: `${newCustomer.name} has been added to the database`,
-      })
+      if (newCustomer) {
+        await loadCustomers() // Refresh the list
+        setIsAddDialogOpen(false)
+
+        toast({
+          title: "Customer Added Successfully",
+          description: `${newCustomer.name} has been added to the database`,
+        })
+      }
     } catch (error) {
+      console.error("Error adding customer:", error)
       toast({
         title: "Error",
         description: "Failed to add customer. Please try again.",
         variant: "destructive",
       })
+    } finally {
+      setIsCreating(false)
     }
   }
 
@@ -103,6 +146,17 @@ export default function CustomersPage() {
     companyCustomers: customers.filter((c) => c.customerType === "company").length,
     totalCreditLimit: customers.reduce((sum, c) => sum + c.creditLimit, 0),
     totalOutstanding: customers.reduce((sum, c) => sum + c.outstandingBalance, 0),
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Loading customers...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -256,8 +310,15 @@ export default function CustomersPage() {
                   <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button type="submit" className="bg-gradient-to-r from-blue-600 to-purple-600">
-                    Add Customer
+                  <Button type="submit" disabled={isCreating} className="bg-gradient-to-r from-blue-600 to-purple-600">
+                    {isCreating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Adding...
+                      </>
+                    ) : (
+                      "Add Customer"
+                    )}
                   </Button>
                 </div>
               </form>
@@ -338,7 +399,7 @@ export default function CustomersPage() {
               <Input
                 placeholder="Search customers by name, phone, email, or ID..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => handleSearch(e.target.value)}
                 className="pl-10 bg-white/80"
               />
             </div>

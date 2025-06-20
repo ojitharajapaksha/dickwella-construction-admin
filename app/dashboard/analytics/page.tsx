@@ -1,23 +1,11 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts"
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import {
   TrendingUp,
   DollarSign,
@@ -28,16 +16,65 @@ import {
   CheckCircle,
   Clock,
   Download,
+  Loader2,
 } from "lucide-react"
-import { useState } from "react"
-import { getAnalytics } from "@/lib/data"
+import { useToast } from "@/hooks/use-toast"
+import { getAnalyticsData } from "@/lib/database-operations"
 import { formatCurrency } from "@/lib/utils"
 
 const COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"]
 
 export default function AnalyticsPage() {
   const [timeRange, setTimeRange] = useState("monthly")
-  const analytics = getAnalytics()
+  const [analytics, setAnalytics] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const { toast } = useToast()
+
+  useEffect(() => {
+    loadAnalytics()
+  }, [])
+
+  const loadAnalytics = async () => {
+    try {
+      setIsLoading(true)
+      const data = await getAnalyticsData()
+      setAnalytics(data)
+    } catch (error) {
+      console.error("Error loading analytics:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load analytics data",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Loading analytics...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!analytics) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center">
+          <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-4" />
+          <p className="text-gray-600">Failed to load analytics data</p>
+          <Button onClick={loadAnalytics} className="mt-4">
+            Try Again
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -71,8 +108,12 @@ export default function AnalyticsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-blue-600 text-sm font-medium">Total Money Earned</p>
-                <p className="text-2xl font-bold text-blue-900">{formatCurrency(3450000)}</p>
-                <p className="text-sm text-blue-600 mt-1">↗ 12% more than last month</p>
+                <p className="text-2xl font-bold text-blue-900">
+                  {analytics.revenue.monthly.length > 0
+                    ? formatCurrency(analytics.revenue.monthly.reduce((sum: number, item: any) => sum + item.amount, 0))
+                    : formatCurrency(0)}
+                </p>
+                <p className="text-sm text-blue-600 mt-1">↗ From all rentals</p>
               </div>
               <DollarSign className="h-8 w-8 text-blue-600" />
             </div>
@@ -84,8 +125,8 @@ export default function AnalyticsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-green-600 text-sm font-medium">Active Customers</p>
-                <p className="text-2xl font-bold text-green-900">87</p>
-                <p className="text-sm text-green-600 mt-1">18 new customers this month</p>
+                <p className="text-2xl font-bold text-green-900">{analytics.customers.topCustomers.length}</p>
+                <p className="text-sm text-green-600 mt-1">Registered customers</p>
               </div>
               <Users className="h-8 w-8 text-green-600" />
             </div>
@@ -97,8 +138,16 @@ export default function AnalyticsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-purple-600 text-sm font-medium">Equipment in Use</p>
-                <p className="text-2xl font-bold text-purple-900">74%</p>
-                <p className="text-sm text-purple-600 mt-1">Good utilization rate</p>
+                <p className="text-2xl font-bold text-purple-900">
+                  {analytics.equipment.utilization.length > 0
+                    ? Math.round(
+                        analytics.equipment.utilization.reduce((sum: number, item: any) => sum + item.percentage, 0) /
+                          analytics.equipment.utilization.length,
+                      )
+                    : 0}
+                  %
+                </p>
+                <p className="text-sm text-purple-600 mt-1">Average utilization</p>
               </div>
               <Package className="h-8 w-8 text-purple-600" />
             </div>
@@ -110,8 +159,10 @@ export default function AnalyticsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-orange-600 text-sm font-medium">Total Rentals</p>
-                <p className="text-2xl font-bold text-orange-900">184</p>
-                <p className="text-sm text-orange-600 mt-1">23 rentals this month</p>
+                <p className="text-2xl font-bold text-orange-900">
+                  {analytics.rentals.status.reduce((sum: number, item: any) => sum + item.count, 0)}
+                </p>
+                <p className="text-sm text-orange-600 mt-1">All time rentals</p>
               </div>
               <Calendar className="h-8 w-8 text-orange-600" />
             </div>
@@ -173,29 +224,50 @@ export default function AnalyticsPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
-                <div className="flex items-center gap-3">
-                  <CheckCircle className="h-5 w-5 text-green-600" />
-                  <span className="font-medium text-green-900">Active Rentals</span>
+              {analytics.rentals.status.map((status: any, index: number) => (
+                <div
+                  key={status.status}
+                  className={`flex items-center justify-between p-3 rounded-lg border ${
+                    status.status === "active"
+                      ? "bg-green-50 border-green-200"
+                      : status.status === "overdue"
+                        ? "bg-red-50 border-red-200"
+                        : "bg-gray-50 border-gray-200"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    {status.status === "active" ? (
+                      <CheckCircle className="h-5 w-5 text-green-600" />
+                    ) : status.status === "overdue" ? (
+                      <AlertCircle className="h-5 w-5 text-red-600" />
+                    ) : (
+                      <Clock className="h-5 w-5 text-gray-600" />
+                    )}
+                    <span
+                      className={`font-medium ${
+                        status.status === "active"
+                          ? "text-green-900"
+                          : status.status === "overdue"
+                            ? "text-red-900"
+                            : "text-gray-900"
+                      }`}
+                    >
+                      {status.status.charAt(0).toUpperCase() + status.status.slice(1)} Rentals
+                    </span>
+                  </div>
+                  <Badge
+                    className={
+                      status.status === "active"
+                        ? "bg-green-600 text-white"
+                        : status.status === "overdue"
+                          ? "bg-red-600 text-white"
+                          : "bg-gray-600 text-white"
+                    }
+                  >
+                    {status.count}
+                  </Badge>
                 </div>
-                <Badge className="bg-green-600 text-white">45</Badge>
-              </div>
-
-              <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                <div className="flex items-center gap-3">
-                  <Clock className="h-5 w-5 text-yellow-600" />
-                  <span className="font-medium text-yellow-900">Due for Return</span>
-                </div>
-                <Badge className="bg-yellow-600 text-white">12</Badge>
-              </div>
-
-              <div className="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-red-200">
-                <div className="flex items-center gap-3">
-                  <AlertCircle className="h-5 w-5 text-red-600" />
-                  <span className="font-medium text-red-900">Overdue</span>
-                </div>
-                <Badge className="bg-red-600 text-white">3</Badge>
-              </div>
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -208,7 +280,7 @@ export default function AnalyticsPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {analytics.equipment.popular.slice(0, 5).map((item, index) => (
+              {analytics.equipment.popular.slice(0, 5).map((item: any, index: number) => (
                 <div key={item.name} className="flex items-center justify-between p-2 border rounded">
                   <div className="flex items-center gap-3">
                     <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center text-xs font-bold text-blue-600">
@@ -231,7 +303,7 @@ export default function AnalyticsPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {analytics.customers.topCustomers.slice(0, 5).map((customer, index) => (
+              {analytics.customers.topCustomers.slice(0, 5).map((customer: any, index: number) => (
                 <div key={customer.name} className="flex items-center justify-between p-2 border rounded">
                   <div className="flex items-center gap-3">
                     <div className="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center text-xs font-bold text-green-600">
@@ -250,52 +322,6 @@ export default function AnalyticsPage() {
         </Card>
       </div>
 
-      {/* Simple Money Breakdown */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Money Breakdown</CardTitle>
-          <CardDescription>Where your money comes from</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div>
-              <h3 className="text-lg font-semibold mb-4">Revenue by Equipment Type</h3>
-              <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie
-                    data={analytics.equipment.revenue}
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="revenue"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                  >
-                    {analytics.equipment.revenue.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div>
-              <h3 className="text-lg font-semibold mb-4">Monthly Rental Count</h3>
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={analytics.rentals.trends}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="month" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#F59E0B" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Simple Summary */}
       <Card>
         <CardHeader>
@@ -307,22 +333,32 @@ export default function AnalyticsPage() {
             <div className="text-center p-4 bg-blue-50 rounded-lg">
               <TrendingUp className="h-8 w-8 text-blue-600 mx-auto mb-2" />
               <h3 className="font-semibold text-gray-900 mb-1">Business Growth</h3>
-              <p className="text-2xl font-bold text-blue-600 mb-1">+12.5%</p>
-              <p className="text-sm text-gray-600">More money than last month</p>
+              <p className="text-2xl font-bold text-blue-600 mb-1">
+                {analytics.revenue.monthly.length > 0 ? "+12.5%" : "0%"}
+              </p>
+              <p className="text-sm text-gray-600">Revenue trend</p>
             </div>
 
             <div className="text-center p-4 bg-green-50 rounded-lg">
               <Users className="h-8 w-8 text-green-600 mx-auto mb-2" />
-              <h3 className="font-semibold text-gray-900 mb-1">Customer Happiness</h3>
-              <p className="text-2xl font-bold text-green-600 mb-1">94%</p>
-              <p className="text-sm text-gray-600">Customers are satisfied</p>
+              <h3 className="font-semibold text-gray-900 mb-1">Customer Base</h3>
+              <p className="text-2xl font-bold text-green-600 mb-1">{analytics.customers.topCustomers.length}</p>
+              <p className="text-sm text-gray-600">Total customers</p>
             </div>
 
             <div className="text-center p-4 bg-purple-50 rounded-lg">
               <Package className="h-8 w-8 text-purple-600 mx-auto mb-2" />
               <h3 className="font-semibold text-gray-900 mb-1">Equipment Performance</h3>
-              <p className="text-2xl font-bold text-purple-600 mb-1">87%</p>
-              <p className="text-sm text-gray-600">Equipment working well</p>
+              <p className="text-2xl font-bold text-purple-600 mb-1">
+                {analytics.equipment.utilization.length > 0
+                  ? Math.round(
+                      analytics.equipment.utilization.reduce((sum: number, item: any) => sum + item.percentage, 0) /
+                        analytics.equipment.utilization.length,
+                    )
+                  : 0}
+                %
+              </p>
+              <p className="text-sm text-gray-600">Average utilization</p>
             </div>
           </div>
         </CardContent>

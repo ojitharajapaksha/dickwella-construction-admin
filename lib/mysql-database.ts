@@ -18,7 +18,7 @@ const dbConfig = {
 const pool = mysql.createPool(dbConfig)
 
 // Helper function to execute queries
-async function executeQuery(query: string, params: any[] = []) {
+export async function executeQuery(query: string, params: any[] = []) {
   try {
     const [results] = await pool.execute(query, params)
     return results

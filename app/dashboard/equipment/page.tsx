@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -30,10 +30,12 @@ import {
   AlertTriangle,
   CheckCircle,
   Eye,
+  Loader2,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { getEquipment, addEquipment, generateQRCode, searchEquipment, type Equipment } from "@/lib/data"
+import { getEquipmentList, createEquipment, searchEquipmentByTerm, generateQRCode } from "@/lib/database-operations"
 import { formatCurrency } from "@/lib/utils"
+import type { Equipment } from "@/lib/types"
 
 const categories = [
   "Heavy Machinery",
@@ -59,33 +61,64 @@ export default function EquipmentPage() {
   const [statusFilter, setStatusFilter] = useState("all")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [selectedType, setSelectedType] = useState<"material" | "machine">("material")
-  const [equipment, setEquipment] = useState(getEquipment())
+  const [equipment, setEquipment] = useState<Equipment[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [isCreating, setIsCreating] = useState(false)
   const { toast } = useToast()
 
-  const filteredEquipment = searchTerm
-    ? searchEquipment(searchTerm).filter((item) => {
-        const matchesCategory = categoryFilter === "all" || item.category === categoryFilter
-        const matchesStatus = statusFilter === "all" || item.status === statusFilter
-        return matchesCategory && matchesStatus
-      })
-    : equipment.filter((item) => {
-        const matchesCategory = categoryFilter === "all" || item.category === categoryFilter
-        const matchesStatus = statusFilter === "all" || item.status === statusFilter
-        return matchesCategory && matchesStatus
-      })
+  // Load equipment data
+  useEffect(() => {
+    loadEquipment()
+  }, [])
 
-  const handleAddEquipment = (formData: FormData) => {
+  const loadEquipment = async () => {
     try {
-      const newEquipment = addEquipment({
+      setIsLoading(true)
+      const data = await getEquipmentList()
+      setEquipment(data)
+    } catch (error) {
+      console.error("Error loading equipment:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load equipment data",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleSearch = async (term: string) => {
+    setSearchTerm(term)
+    if (term.trim()) {
+      try {
+        const results = await searchEquipmentByTerm(term)
+        setEquipment(results)
+      } catch (error) {
+        console.error("Error searching equipment:", error)
+      }
+    } else {
+      loadEquipment()
+    }
+  }
+
+  const filteredEquipment = equipment.filter((item) => {
+    const matchesCategory = categoryFilter === "all" || item.category === categoryFilter
+    const matchesStatus = statusFilter === "all" || item.status === statusFilter
+    return matchesCategory && matchesStatus
+  })
+
+  const handleAddEquipment = async (formData: FormData) => {
+    try {
+      setIsCreating(true)
+
+      const equipmentData = {
         name: formData.get("name") as string,
         type: selectedType,
         category: formData.get("category") as string,
         brand: (formData.get("brand") as string) || undefined,
         condition: (formData.get("condition") as any) || "excellent",
         totalQuantity: Number.parseInt(formData.get("totalQuantity") as string),
-        availableQuantity: Number.parseInt(formData.get("totalQuantity") as string),
-        reservedQuantity: 0,
-        maintenanceQuantity: 0,
 
         // Material specific
         length: formData.get("length") ? Number.parseFloat(formData.get("length") as string) : undefined,
@@ -111,26 +144,31 @@ export default function EquipmentPage() {
         monthlyRate: formData.get("monthlyRate") ? Number.parseFloat(formData.get("monthlyRate") as string) : undefined,
         securityDeposit: Number.parseFloat(formData.get("securityDeposit") as string) || 0,
 
-        status: "available",
         qrCode: generateQRCode("EQP"),
-        barcode: generateQRCode("BAR"),
         location: (formData.get("location") as string) || "Main Yard",
         notes: (formData.get("notes") as string) || undefined,
-      })
+      }
 
-      setEquipment(getEquipment()) // Refresh the equipment list
-      setIsAddDialogOpen(false)
+      const newEquipment = await createEquipment(equipmentData)
 
-      toast({
-        title: "Equipment Added Successfully",
-        description: `${newEquipment.name} has been added with QR code: ${newEquipment.qrCode}`,
-      })
+      if (newEquipment) {
+        await loadEquipment() // Refresh the list
+        setIsAddDialogOpen(false)
+
+        toast({
+          title: "Equipment Added Successfully",
+          description: `${newEquipment.name} has been added with QR code: ${newEquipment.qrCode}`,
+        })
+      }
     } catch (error) {
+      console.error("Error adding equipment:", error)
       toast({
         title: "Error",
         description: "Failed to add equipment. Please try again.",
         variant: "destructive",
       })
+    } finally {
+      setIsCreating(false)
     }
   }
 
@@ -140,6 +178,17 @@ export default function EquipmentPage() {
     if (percentage <= 25) return { status: "Low Stock", color: "text-orange-600" }
     if (percentage <= 50) return { status: "Medium Stock", color: "text-yellow-600" }
     return { status: "In Stock", color: "text-green-600" }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Loading equipment...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -366,7 +415,16 @@ export default function EquipmentPage() {
                   <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button type="submit">Add Equipment</Button>
+                  <Button type="submit" disabled={isCreating}>
+                    {isCreating ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Adding...
+                      </>
+                    ) : (
+                      "Add Equipment"
+                    )}
+                  </Button>
                 </div>
               </form>
             </DialogContent>
@@ -437,7 +495,7 @@ export default function EquipmentPage() {
               <Input
                 placeholder="Search equipment by name, brand, or category..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => handleSearch(e.target.value)}
                 className="pl-10"
               />
             </div>
