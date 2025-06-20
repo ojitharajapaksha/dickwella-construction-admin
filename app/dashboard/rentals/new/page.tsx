@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -19,24 +19,61 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Plus, Minus, Search, User, Package, Calculator, FileText, Trash2 } from "lucide-react"
+import { Plus, Minus, Search, User, Package, Calculator, FileText, Trash2, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import {
-  getCustomers,
-  getEquipment,
-  addRental,
-  generateRentalNumber,
+  fetchCustomers,
+  fetchEquipment,
+  createRental,
+  generateNextRentalNumber,
   generateQRCode,
-  type Customer,
-  type Equipment,
-  type RentalItem,
-} from "@/lib/data"
+} from "@/lib/api-client"
 import { formatCurrency } from "@/lib/utils"
+
+interface Customer {
+  id: string
+  name: string
+  primaryPhone: string
+  email: string
+  customerType: string
+  status: string
+  creditLimit: number
+  outstandingBalance: number
+}
+
+interface Equipment {
+  id: string
+  name: string
+  brand: string
+  category: string
+  dailyRate: number
+  hourlyRate?: number
+  weeklyRate?: number
+  monthlyRate?: number
+  availableQuantity: number
+  securityDeposit?: number
+}
+
+interface RentalItem {
+  id: string
+  equipmentId: string
+  equipmentName: string
+  quantity: number
+  rateType: "hourly" | "daily" | "weekly" | "monthly"
+  rate: number
+  duration: number
+  subtotal: number
+}
 
 export default function NewRentalPage() {
   const router = useRouter()
   const { toast } = useToast()
   const [step, setStep] = useState(1)
+  const [loading, setLoading] = useState(false)
+
+  // Data states
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [equipment, setEquipment] = useState<Equipment[]>([])
 
   // Form data
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
@@ -55,14 +92,30 @@ export default function NewRentalPage() {
   const [customerSearch, setCustomerSearch] = useState("")
   const [equipmentSearch, setEquipmentSearch] = useState("")
 
-  const customers = getCustomers()
-  const equipment = getEquipment()
+  useEffect(() => {
+    loadInitialData()
+  }, [])
+
+  const loadInitialData = async () => {
+    try {
+      const [customersData, equipmentData] = await Promise.all([fetchCustomers(), fetchEquipment()])
+      setCustomers(customersData)
+      setEquipment(equipmentData)
+    } catch (error) {
+      console.error("Failed to load initial data:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load data. Please refresh the page.",
+        variant: "destructive",
+      })
+    }
+  }
 
   const filteredCustomers = customers.filter(
     (customer) =>
       customer.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
       customer.primaryPhone.includes(customerSearch) ||
-      customer.idNumber.toLowerCase().includes(customerSearch.toLowerCase()),
+      customer.email.toLowerCase().includes(customerSearch.toLowerCase()),
   )
 
   const filteredEquipment = equipment.filter(
@@ -138,7 +191,7 @@ export default function NewRentalPage() {
     }
   }
 
-  const handleCreateRental = () => {
+  const handleCreateRental = async () => {
     if (!selectedCustomer) {
       toast({
         title: "Customer Required",
@@ -166,47 +219,58 @@ export default function NewRentalPage() {
       return
     }
 
-    const totals = calculateTotals()
-    const securityDeposit = rentalItems.reduce((sum, item) => {
-      const equipmentItem = equipment.find((e) => e.id === item.equipmentId)
-      return sum + (equipmentItem?.securityDeposit || 0) * item.quantity
-    }, 0)
+    try {
+      setLoading(true)
+      const totals = calculateTotals()
+      const securityDeposit = rentalItems.reduce((sum, item) => {
+        const equipmentItem = equipment.find((e) => e.id === item.equipmentId)
+        return sum + (equipmentItem?.securityDeposit || 0) * item.quantity
+      }, 0)
 
-    const newRental = addRental({
-      rentalNumber: generateRentalNumber(),
-      customerId: selectedCustomer.id,
-      customerName: selectedCustomer.name,
-      customerPhone: selectedCustomer.primaryPhone,
-      adminId: "1", // Current admin user
-      rentalDate: new Date().toISOString(),
-      startDate,
-      expectedReturnDate,
-      items: rentalItems,
-      subtotal: totals.subtotal,
-      taxRate: totals.taxRate,
-      taxAmount: totals.taxAmount,
-      discountAmount: totals.discountAmount,
-      securityDeposit,
-      totalAmount: totals.totalAmount,
-      paidAmount: 0,
-      outstandingAmount: totals.totalAmount,
-      status: "active",
-      paymentStatus: "pending",
-      deliveryRequired,
-      deliveryAddress: deliveryRequired ? deliveryAddress : undefined,
-      deliveryFee: totals.deliveryFee,
-      pickupRequired,
-      pickupFee: totals.pickupFee,
-      notes,
-      qrCode: generateQRCode("RNT"),
-    })
+      const rentalNumber = await generateNextRentalNumber()
 
-    toast({
-      title: "Rental Created Successfully",
-      description: `Rental ${newRental.rentalNumber} has been created`,
-    })
+      const newRental = await createRental({
+        rentalNumber,
+        customerId: selectedCustomer.id,
+        customerName: selectedCustomer.name,
+        customerPhone: selectedCustomer.primaryPhone,
+        rentalDate: new Date().toISOString(),
+        startDate,
+        expectedReturnDate,
+        items: rentalItems,
+        subtotal: totals.subtotal,
+        taxRate: totals.taxRate,
+        taxAmount: totals.taxAmount,
+        discountAmount: totals.discountAmount,
+        securityDeposit,
+        totalAmount: totals.totalAmount,
+        paidAmount: 0,
+        outstandingAmount: totals.totalAmount,
+        deliveryRequired,
+        deliveryAddress: deliveryRequired ? deliveryAddress : undefined,
+        deliveryFee: totals.deliveryFee,
+        pickupRequired,
+        pickupFee: totals.pickupFee,
+        notes,
+        qrCode: generateQRCode("RNT"),
+      })
 
-    router.push(`/dashboard/rentals/${newRental.id}/invoice`)
+      toast({
+        title: "Rental Created Successfully",
+        description: `Rental ${rentalNumber} has been created`,
+      })
+
+      router.push(`/dashboard/rentals/${newRental.id}/invoice`)
+    } catch (error) {
+      console.error("Failed to create rental:", error)
+      toast({
+        title: "Error",
+        description: "Failed to create rental. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   const totals = calculateTotals()
@@ -280,7 +344,7 @@ export default function NewRentalPage() {
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                       <Input
-                        placeholder="Search by name, phone, or ID..."
+                        placeholder="Search by name, phone, or email..."
                         value={customerSearch}
                         onChange={(e) => setCustomerSearch(e.target.value)}
                         className="pl-10"
@@ -451,9 +515,9 @@ export default function NewRentalPage() {
                                   value === "hourly"
                                     ? equipmentItem?.hourlyRate || equipmentItem?.dailyRate || 0
                                     : value === "weekly"
-                                      ? equipmentItem?.weeklyRate || equipmentItem?.dailyRate * 7 || 0
+                                      ? equipmentItem?.weeklyRate ?? (equipmentItem?.dailyRate !== undefined ? equipmentItem.dailyRate * 7 : 0)
                                       : value === "monthly"
-                                        ? equipmentItem?.monthlyRate || equipmentItem?.dailyRate * 30 || 0
+                                        ? equipmentItem?.monthlyRate ?? (equipmentItem?.dailyRate !== undefined ? equipmentItem.dailyRate * 30 : 0)
                                         : equipmentItem?.dailyRate || 0
                                 updateRentalItem(item.id, { rateType: value, rate })
                               }}
@@ -671,9 +735,18 @@ export default function NewRentalPage() {
             <Button variant="outline" onClick={() => setStep(2)}>
               Previous
             </Button>
-            <Button onClick={handleCreateRental} className="bg-green-600 hover:bg-green-700">
-              <FileText className="mr-2 h-4 w-4" />
-              Create Rental & Generate Invoice
+            <Button onClick={handleCreateRental} className="bg-green-600 hover:bg-green-700" disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Create Rental & Generate Invoice
+                </>
+              )}
             </Button>
           </div>
         </div>

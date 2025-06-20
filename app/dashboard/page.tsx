@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -12,8 +13,6 @@ import {
   AlertTriangle,
   CheckCircle,
   Calendar,
-  DollarSign,
-  Activity,
   Eye,
   ArrowUpRight,
   Sparkles,
@@ -22,39 +21,121 @@ import {
   Clock,
   Target,
   Wrench,
+  Loader2,
 } from "lucide-react"
 import { formatCurrency, formatDate, getStatusColor } from "@/lib/utils"
-import { getRentals, getEquipment, getCustomers } from "@/lib/data"
+import { fetchAnalytics, fetchEquipment, fetchCustomers, fetchRentals } from "@/lib/api-client"
 import Link from "next/link"
 
+interface DashboardStats {
+  totalEquipment: number
+  availableEquipment: number
+  activeRentals: number
+  totalCustomers: number
+  monthlyRevenue: number
+  overdueRentals: number
+  totalValue: number
+  utilizationRate: number
+}
+
+interface RecentRental {
+  id: string
+  rentalNumber: string
+  customerName: string
+  customerPhone: string
+  totalAmount: number
+  status: string
+  rentalDate: string
+  expectedReturnDate: string
+  outstandingAmount: number
+  items: Array<{
+    equipmentName: string
+    quantity: number
+  }>
+}
+
+interface LowStockEquipment {
+  id: string
+  name: string
+  category: string
+  availableQuantity: number
+  totalQuantity: number
+}
+
 export default function DashboardPage() {
-  const rentals = getRentals()
-  const equipment = getEquipment()
-  const customers = getCustomers()
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [recentRentals, setRecentRentals] = useState<RecentRental[]>([])
+  const [lowStockEquipment, setLowStockEquipment] = useState<LowStockEquipment[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Calculate statistics
-  const stats = {
-    totalEquipment: equipment.length,
-    availableEquipment: equipment.filter((e) => e.status === "available").length,
-    activeRentals: rentals.filter((r) => r.status === "active").length,
-    totalCustomers: customers.length,
-    monthlyRevenue: rentals.reduce((sum, r) => sum + r.totalAmount, 0),
-    overdueRentals: rentals.filter((r) => r.status === "overdue").length,
-    totalValue: equipment.reduce((sum, e) => sum + e.dailyRate * e.totalQuantity, 0),
-    utilizationRate:
-      Math.round(
-        (equipment.reduce((sum, e) => sum + (e.totalQuantity - e.availableQuantity), 0) /
-          equipment.reduce((sum, e) => sum + e.totalQuantity, 0)) *
-          100,
-      ) || 0,
+  useEffect(() => {
+    loadDashboardData()
+  }, [])
+
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      // Fetch all data in parallel
+      const [analyticsData, equipmentData, customersData, rentalsData] = await Promise.all([
+        fetchAnalytics(),
+        fetchEquipment(),
+        fetchCustomers(),
+        fetchRentals(),
+      ])
+
+      // Calculate stats
+      const totalEquipment = equipmentData.length
+      const availableEquipment = equipmentData.filter((e: any) => e.status === "available").length
+      const activeRentals = rentalsData.filter((r: any) => r.status === "active").length
+      const totalCustomers = customersData.length
+      const monthlyRevenue = rentalsData.reduce((sum: number, r: any) => sum + (r.totalAmount || 0), 0)
+      const overdueRentals = rentalsData.filter((r: any) => r.status === "overdue").length
+      const totalValue = equipmentData.reduce(
+        (sum: number, e: any) => sum + (e.dailyRate || 0) * (e.totalQuantity || 0),
+        0,
+      )
+
+      const totalEquipmentCount = equipmentData.reduce((sum: number, e: any) => sum + (e.totalQuantity || 0), 0)
+      const rentedEquipmentCount = equipmentData.reduce(
+        (sum: number, e: any) => sum + ((e.totalQuantity || 0) - (e.availableQuantity || 0)),
+        0,
+      )
+      const utilizationRate =
+        totalEquipmentCount > 0 ? Math.round((rentedEquipmentCount / totalEquipmentCount) * 100) : 0
+
+      setStats({
+        totalEquipment,
+        availableEquipment,
+        activeRentals,
+        totalCustomers,
+        monthlyRevenue,
+        overdueRentals,
+        totalValue,
+        utilizationRate,
+      })
+
+      // Set recent rentals (last 5)
+      const sortedRentals = rentalsData
+        .sort(
+          (a: any, b: any) =>
+            new Date(b.createdAt || b.rentalDate).getTime() - new Date(a.createdAt || a.rentalDate).getTime(),
+        )
+        .slice(0, 5)
+      setRecentRentals(sortedRentals)
+
+      // Set low stock equipment
+      const lowStock = equipmentData.filter((e: any) => (e.availableQuantity || 0) <= 2 && (e.totalQuantity || 0) > 2)
+      setLowStockEquipment(lowStock)
+    } catch (err) {
+      console.error("Dashboard data loading error:", err)
+      setError("Failed to load dashboard data. Please try again.")
+    } finally {
+      setLoading(false)
+    }
   }
-
-  const recentRentals = rentals.slice(0, 5).map((rental) => ({
-    ...rental,
-    customer: customers.find((c) => c.id === rental.customerId),
-  }))
-
-  const lowStockEquipment = equipment.filter((e) => e.availableQuantity <= 2 && e.totalQuantity > 2)
 
   const quickActions = [
     {
@@ -86,6 +167,33 @@ export default function DashboardPage() {
       color: "from-orange-500 to-red-500",
     },
   ]
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Loading dashboard...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-4" />
+          <p className="text-red-600 mb-4">{error}</p>
+          <Button onClick={loadDashboardData}>Try Again</Button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!stats) {
+    return null
+  }
 
   return (
     <TooltipProvider>
@@ -164,7 +272,8 @@ export default function DashboardPage() {
                     {stats.availableEquipment} available now
                   </div>
                   <div className="mt-2 text-xs text-blue-200">
-                    {Math.round((stats.availableEquipment / stats.totalEquipment) * 100)}% availability rate
+                    {stats.totalEquipment > 0 ? Math.round((stats.availableEquipment / stats.totalEquipment) * 100) : 0}
+                    % availability rate
                   </div>
                 </CardContent>
               </Card>
@@ -229,15 +338,12 @@ export default function DashboardPage() {
                     <ArrowUpRight className="h-4 w-4 text-green-300 mr-2" />
                     Growing customer base
                   </div>
-                  <div className="mt-2 text-xs text-purple-200">
-                    {customers.filter((c) => c.customerType === "company").length} companies,{" "}
-                    {customers.filter((c) => c.customerType === "individual").length} individuals
-                  </div>
+                  <div className="mt-2 text-xs text-purple-200">Active customer database</div>
                 </CardContent>
               </Card>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Total registered customers in your database. Mix of companies and individuals.</p>
+              <p>Total registered customers in your database.</p>
             </TooltipContent>
           </Tooltip>
 
@@ -259,12 +365,12 @@ export default function DashboardPage() {
                     <ArrowUpRight className="h-4 w-4 text-green-300 mr-2" />
                     Strong performance
                   </div>
-                  <div className="mt-2 text-xs text-orange-200">Revenue from {rentals.length} total rentals</div>
+                  <div className="mt-2 text-xs text-orange-200">Revenue from all rentals</div>
                 </CardContent>
               </Card>
             </TooltipTrigger>
             <TooltipContent>
-              <p>Total revenue generated this month from all rental activities.</p>
+              <p>Total revenue generated from all rental activities.</p>
             </TooltipContent>
           </Tooltip>
         </div>
@@ -306,153 +412,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Enhanced Secondary Metrics with better visual design */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl hover:shadow-2xl transition-all duration-300">
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-xl flex items-center justify-center">
-                  <Activity className="h-5 w-5 text-white" />
-                </div>
-                Equipment Performance
-              </CardTitle>
-              <CardDescription>Current utilization and availability metrics</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <span className="font-medium text-gray-700">Utilization Rate</span>
-                    <span className="font-bold text-blue-600 text-lg">{stats.utilizationRate}%</span>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-4 overflow-hidden">
-                    <div
-                      className="bg-gradient-to-r from-blue-500 to-cyan-500 h-4 rounded-full transition-all duration-1000 shadow-lg relative"
-                      style={{ width: `${stats.utilizationRate}%` }}
-                    >
-                      <div className="absolute inset-0 bg-white/20 animate-pulse"></div>
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-500 mt-2">
-                    {stats.utilizationRate >= 80
-                      ? "🟢 Excellent utilization"
-                      : stats.utilizationRate >= 60
-                        ? "🟡 Good utilization"
-                        : "🔴 Low utilization"}
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                    <div className="text-gray-600 text-xs font-medium">Currently Rented</div>
-                    <div className="font-bold text-blue-600 text-xl">
-                      {equipment.reduce((sum, e) => sum + (e.totalQuantity - e.availableQuantity), 0)}
-                    </div>
-                    <div className="text-xs text-blue-600 mt-1">Active equipment</div>
-                  </div>
-                  <div className="bg-green-50 p-4 rounded-xl border border-green-100">
-                    <div className="text-gray-600 text-xs font-medium">Available Now</div>
-                    <div className="font-bold text-green-600 text-xl">{stats.availableEquipment}</div>
-                    <div className="text-xs text-green-600 mt-1">Ready to rent</div>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl hover:shadow-2xl transition-all duration-300">
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-r from-green-500 to-emerald-500 rounded-xl flex items-center justify-center">
-                  <DollarSign className="h-5 w-5 text-white" />
-                </div>
-                Financial Summary
-              </CardTitle>
-              <CardDescription>Revenue and outstanding amounts overview</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center p-4 bg-green-50 rounded-xl border border-green-100">
-                  <div>
-                    <span className="text-gray-600 font-medium text-sm">Total Revenue</span>
-                    <div className="text-xs text-gray-500">This month</div>
-                  </div>
-                  <span className="font-bold text-green-600 text-lg">{formatCurrency(stats.monthlyRevenue)}</span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-orange-50 rounded-xl border border-orange-100">
-                  <div>
-                    <span className="text-gray-600 font-medium text-sm">Outstanding</span>
-                    <div className="text-xs text-gray-500">Pending payments</div>
-                  </div>
-                  <span className="font-bold text-orange-600 text-lg">
-                    {formatCurrency(rentals.reduce((sum, r) => sum + r.outstandingAmount, 0))}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center p-4 bg-blue-50 rounded-xl border border-blue-100">
-                  <div>
-                    <span className="text-gray-600 font-medium text-sm">Equipment Value</span>
-                    <div className="text-xs text-gray-500">Total inventory</div>
-                  </div>
-                  <span className="font-bold text-blue-600 text-lg">{formatCurrency(stats.totalValue)}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-xl hover:shadow-2xl transition-all duration-300">
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-3">
-                <div className="w-10 h-10 bg-gradient-to-r from-red-500 to-pink-500 rounded-xl flex items-center justify-center">
-                  <AlertTriangle className="h-5 w-5 text-white" />
-                </div>
-                System Alerts
-              </CardTitle>
-              <CardDescription>Important notifications and warnings</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {stats.overdueRentals > 0 && (
-                  <div className="flex items-center gap-3 p-3 bg-red-50 rounded-xl border border-red-100">
-                    <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse flex-shrink-0"></div>
-                    <div className="flex-1">
-                      <span className="text-red-700 font-medium text-sm">{stats.overdueRentals} overdue rentals</span>
-                      <div className="text-xs text-red-600 mt-1">Requires immediate attention</div>
-                    </div>
-                    <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50">
-                      View
-                    </Button>
-                  </div>
-                )}
-                {lowStockEquipment.length > 0 && (
-                  <div className="flex items-center gap-3 p-3 bg-yellow-50 rounded-xl border border-yellow-100">
-                    <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse flex-shrink-0"></div>
-                    <div className="flex-1">
-                      <span className="text-yellow-700 font-medium text-sm">
-                        {lowStockEquipment.length} items low stock
-                      </span>
-                      <div className="text-xs text-yellow-600 mt-1">Consider restocking soon</div>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-yellow-600 border-yellow-200 hover:bg-yellow-50"
-                    >
-                      View
-                    </Button>
-                  </div>
-                )}
-                <div className="flex items-center gap-3 p-3 bg-green-50 rounded-xl border border-green-100">
-                  <div className="w-3 h-3 bg-green-500 rounded-full flex-shrink-0"></div>
-                  <div className="flex-1">
-                    <span className="text-green-700 font-medium text-sm">System operational</span>
-                    <div className="text-xs text-green-600 mt-1">All systems running smoothly</div>
-                  </div>
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
         {/* Enhanced Recent Activity with better information architecture */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent Rentals */}
@@ -476,43 +435,44 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {recentRentals.map((rental) => (
-                  <div
-                    key={rental.id}
-                    className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl hover:from-blue-50 hover:to-purple-50 transition-all duration-300 border border-gray-200/50 group"
-                  >
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <span className="font-bold text-blue-600 bg-blue-100 px-3 py-1 rounded-lg text-sm">
-                          {rental.rentalNumber}
-                        </span>
-                        <Badge className={`${getStatusColor(rental.status)} border-0 text-xs`}>{rental.status}</Badge>
+                {recentRentals.length > 0 ? (
+                  recentRentals.map((rental) => (
+                    <div
+                      key={rental.id}
+                      className="flex items-center justify-between p-4 bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl hover:from-blue-50 hover:to-purple-50 transition-all duration-300 border border-gray-200/50 group"
+                    >
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className="font-bold text-blue-600 bg-blue-100 px-3 py-1 rounded-lg text-sm">
+                            {rental.rentalNumber}
+                          </span>
+                          <Badge className={`${getStatusColor(rental.status)} border-0 text-xs`}>{rental.status}</Badge>
+                        </div>
+                        <p className="text-sm text-gray-900 font-semibold">{rental.customerName}</p>
+                        <p className="text-sm text-gray-600">{rental.items?.[0]?.equipmentName || "No equipment"}</p>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            Due: {formatDate(rental.expectedReturnDate)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatDate(rental.rentalDate)}
+                          </span>
+                        </div>
                       </div>
-                      <p className="text-sm text-gray-900 font-semibold">{rental.customerName}</p>
-                      <p className="text-sm text-gray-600">{rental.items[0]?.equipmentName}</p>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                        <span className="flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          Due: {formatDate(rental.expectedReturnDate)}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {formatDate(rental.rentalDate)}
-                        </span>
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-gray-900">{formatCurrency(rental.totalAmount)}</p>
+                        <p className="text-xs text-gray-500">Total amount</p>
+                        {rental.outstandingAmount > 0 && (
+                          <p className="text-xs text-red-600 font-medium mt-1">
+                            {formatCurrency(rental.outstandingAmount)} pending
+                          </p>
+                        )}
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-gray-900">{formatCurrency(rental.totalAmount)}</p>
-                      <p className="text-xs text-gray-500">Total amount</p>
-                      {rental.outstandingAmount > 0 && (
-                        <p className="text-xs text-red-600 font-medium mt-1">
-                          {formatCurrency(rental.outstandingAmount)} pending
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {recentRentals.length === 0 && (
+                  ))
+                ) : (
                   <div className="text-center py-8">
                     <FileText className="h-12 w-12 text-gray-300 mx-auto mb-4" />
                     <p className="text-gray-500 font-medium">No recent rentals</p>

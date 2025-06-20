@@ -1,120 +1,131 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
-import { Plus, Search, QrCode, Eye, RotateCcw, FileText } from "lucide-react"
+import { Plus, Search, QrCode, Eye, RotateCcw, FileText, Loader2, AlertTriangle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { getRentals, getCustomers, getEquipment, updateRental, searchRentals } from "@/lib/data"
+import { fetchRentals } from "@/lib/api-client"
+import { formatCurrency, formatDate, getStatusColor } from "@/lib/utils"
 import Link from "next/link"
 
 interface Rental {
   id: string
   rentalNumber: string
   customerName: string
-  customerContact: string
-  equipment: string
-  quantity: number
-  rateType: "hourly" | "daily"
-  rate: number
-  duration: number
+  customerPhone: string
   totalAmount: number
   status: "active" | "returned" | "overdue"
   rentalDate: string
   expectedReturnDate: string
   actualReturnDate?: string
   qrCode: string
+  items: Array<{
+    equipmentName: string
+    quantity: number
+    rateType: string
+    duration: number
+  }>
 }
 
 export default function RentalsPage() {
+  const [rentals, setRentals] = useState<Rental[]>([])
+  const [filteredRentals, setFilteredRentals] = useState<Rental[]>([])
   const [searchTerm, setSearchTerm] = useState("")
-  const [isNewRentalDialogOpen, setIsNewRentalDialogOpen] = useState(false)
-  const [selectedCustomer, setSelectedCustomer] = useState("")
-  const [selectedEquipment, setSelectedEquipment] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const { toast } = useToast()
 
-  // Mock data
-  const [rentals, setRentals] = useState(getRentals())
-  const customers = getCustomers()
-  const equipment = getEquipment()
+  useEffect(() => {
+    loadRentals()
+  }, [])
 
-  const filteredRentals = searchTerm ? searchRentals(searchTerm) : rentals
-
-  const generateRentalNumber = () => {
-    return "R" + (rentals.length + 1).toString().padStart(3, "0")
-  }
-
-  const generateQRCode = () => {
-    return "RNT" + Math.random().toString(36).substr(2, 6).toUpperCase()
-  }
-
-  const handleCreateRental = (formData: FormData) => {
-    const customer = customers.find((c) => c.id === selectedCustomer)
-    const equipmentItem = equipment.find((e) => e.id === selectedEquipment)
-    const rateType = formData.get("rateType") as "hourly" | "daily"
-    const duration = Number.parseInt(formData.get("duration") as string)
-    const quantity = Number.parseInt(formData.get("quantity") as string)
-
-    if (!customer || !equipmentItem) return
-
-    const rate = rateType === "daily" ? equipmentItem.dailyRate : equipmentItem.hourlyRate || 0
-    const totalAmount = rate * duration * quantity
-
-    const newRental: Rental = {
-      id: Date.now().toString(),
-      rentalNumber: generateRentalNumber(),
-      customerName: customer.name,
-      customerContact: customer.contact,
-      equipment: equipmentItem.name,
-      quantity,
-      rateType,
-      rate,
-      duration,
-      totalAmount,
-      status: "active",
-      rentalDate: new Date().toISOString().split("T")[0],
-      expectedReturnDate: formData.get("expectedReturnDate") as string,
-      qrCode: generateQRCode(),
+  useEffect(() => {
+    // Filter rentals based on search term
+    if (searchTerm.trim() === "") {
+      setFilteredRentals(rentals)
+    } else {
+      const filtered = rentals.filter(
+        (rental) =>
+          rental.rentalNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          rental.customerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          rental.customerPhone.includes(searchTerm) ||
+          rental.qrCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          rental.items.some((item) => item.equipmentName.toLowerCase().includes(searchTerm.toLowerCase())),
+      )
+      setFilteredRentals(filtered)
     }
+  }, [searchTerm, rentals])
 
-    setRentals([...rentals, newRental])
-    setIsNewRentalDialogOpen(false)
-    setSelectedCustomer("")
-    setSelectedEquipment("")
-
-    toast({
-      title: "Rental Created",
-      description: `Rental ${newRental.rentalNumber} created successfully with QR code: ${newRental.qrCode}`,
-    })
+  const loadRentals = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const data = await fetchRentals()
+      setRentals(data)
+      setFilteredRentals(data)
+    } catch (err) {
+      console.error("Failed to load rentals:", err)
+      setError("Failed to load rentals. Please try again.")
+      toast({
+        title: "Error",
+        description: "Failed to load rentals. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleReturnItem = (rentalId: string) => {
-    const updatedRental = updateRental(rentalId, {
-      status: "returned",
-      actualReturnDate: new Date().toISOString().split("T")[0],
-    })
-
-    if (updatedRental) {
-      setRentals(getRentals()) // Refresh the rentals list
+  const handleReturnItem = async (rentalId: string) => {
+    try {
+      // TODO: Implement return functionality via API
       toast({
-        title: "Item Returned",
-        description: "Equipment has been successfully returned",
+        title: "Feature Coming Soon",
+        description: "Return processing will be available soon.",
+      })
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: "Failed to process return. Please try again.",
+        variant: "destructive",
       })
     }
+  }
+
+  const getStatusStats = () => {
+    const active = rentals.filter((r) => r.status === "active").length
+    const overdue = rentals.filter((r) => r.status === "overdue").length
+    const returned = rentals.filter((r) => r.status === "returned").length
+    return { active, overdue, returned, total: rentals.length }
+  }
+
+  const stats = getStatusStats()
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Loading rentals...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-96">
+        <div className="text-center">
+          <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-4" />
+          <p className="text-red-600 mb-4">{error}</p>
+          <Button onClick={loadRentals}>Try Again</Button>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -124,94 +135,12 @@ export default function RentalsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Rental Management</h1>
           <p className="text-gray-600">Manage equipment rentals and returns</p>
         </div>
-        <Dialog open={isNewRentalDialogOpen} onOpenChange={setIsNewRentalDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              New Rental
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Create New Rental</DialogTitle>
-              <DialogDescription>Create a new equipment rental agreement</DialogDescription>
-            </DialogHeader>
-            <form action={handleCreateRental} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="customer">Customer</Label>
-                  <Select value={selectedCustomer} onValueChange={setSelectedCustomer} required>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select customer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {customers.map((customer) => (
-                        <SelectItem key={customer.id} value={customer.id}>
-                          {customer.name} - {customer.contact}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="equipment">Equipment</Label>
-                  <Select value={selectedEquipment} onValueChange={setSelectedEquipment} required>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select equipment" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {equipment.map((item) => (
-                        <SelectItem key={item.id} value={item.id}>
-                          {item.name} - Rs. {item.dailyRate}/day
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="quantity">Quantity</Label>
-                  <Input id="quantity" name="quantity" type="number" min="1" defaultValue="1" required />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="rateType">Rate Type</Label>
-                  <Select name="rateType" defaultValue="daily">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="daily">Daily</SelectItem>
-                      <SelectItem value="hourly">Hourly</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="duration">Duration</Label>
-                  <Input id="duration" name="duration" type="number" min="1" required />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="expectedReturnDate">Expected Return Date</Label>
-                <Input id="expectedReturnDate" name="expectedReturnDate" type="date" required />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="notes">Notes (Optional)</Label>
-                <Textarea id="notes" name="notes" placeholder="Additional notes..." />
-              </div>
-
-              <div className="flex justify-end space-x-2">
-                <Button type="button" variant="outline" onClick={() => setIsNewRentalDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit">Create Rental</Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
+        <Link href="/dashboard/rentals/new">
+          <Button>
+            <Plus className="mr-2 h-4 w-4" />
+            New Rental
+          </Button>
+        </Link>
       </div>
 
       {/* Search */}
@@ -220,7 +149,7 @@ export default function RentalsPage() {
           <div className="relative">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search rentals by number, customer, or equipment..."
+              placeholder="Search rentals by number, customer, equipment, or QR code..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-8"
@@ -232,97 +161,115 @@ export default function RentalsPage() {
       {/* Rentals Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Active Rentals</CardTitle>
+          <CardTitle>Rental Records</CardTitle>
           <CardDescription>
-            Total: {rentals.length} | Active: {rentals.filter((r) => r.status === "active").length} | Overdue:{" "}
-            {rentals.filter((r) => r.status === "overdue").length}
+            Total: {stats.total} | Active: {stats.active} | Overdue: {stats.overdue} | Returned: {stats.returned}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Rental #</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Equipment</TableHead>
-                <TableHead>Duration</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Return Date</TableHead>
-                <TableHead>QR Code</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredRentals.map((rental) => (
-                <TableRow key={rental.id}>
-                  <TableCell className="font-medium">{rental.rentalNumber}</TableCell>
-                  <TableCell>
-                    <div>
-                      <div className="font-medium">{rental.customerName}</div>
-                      <div className="text-sm text-gray-500">{rental.customerContact}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div>
-                      <div>{rental.equipment}</div>
-                      <div className="text-sm text-gray-500">Qty: {rental.quantity}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    {rental.duration} {rental.rateType === "daily" ? "days" : "hours"}
-                  </TableCell>
-                  <TableCell>Rs. {rental.totalAmount.toLocaleString()}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={
-                        rental.status === "active"
-                          ? "default"
-                          : rental.status === "overdue"
-                            ? "destructive"
-                            : "secondary"
-                      }
-                    >
-                      {rental.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div>
-                      <div className="text-sm">Expected: {rental.expectedReturnDate}</div>
-                      {rental.actualReturnDate && (
-                        <div className="text-sm text-green-600">Returned: {rental.actualReturnDate}</div>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <code className="text-xs bg-gray-100 px-2 py-1 rounded">{rental.qrCode}</code>
-                      <Button variant="ghost" size="sm">
-                        <QrCode className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="sm">
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" asChild>
-                        <Link href={`/dashboard/rentals/${rental.id}/invoice`}>
-                          <FileText className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      {rental.status === "active" && (
-                        <Button variant="ghost" size="sm" onClick={() => handleReturnItem(rental.id)}>
-                          <RotateCcw className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          {filteredRentals.length === 0 ? (
+            <div className="text-center py-12">
+              <FileText className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+              <p className="text-gray-500 font-medium">
+                {searchTerm ? "No rentals found matching your search" : "No rentals found"}
+              </p>
+              <p className="text-sm text-gray-400 mt-1">
+                {searchTerm ? "Try adjusting your search terms" : "Create your first rental to get started"}
+              </p>
+              {!searchTerm && (
+                <Link href="/dashboard/rentals/new">
+                  <Button className="mt-4">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create First Rental
+                  </Button>
+                </Link>
+              )}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Rental #</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Equipment</TableHead>
+                    <TableHead>Duration</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Return Date</TableHead>
+                    <TableHead>QR Code</TableHead>
+                    <TableHead>Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredRentals.map((rental) => (
+                    <TableRow key={rental.id}>
+                      <TableCell className="font-medium">{rental.rentalNumber}</TableCell>
+                      <TableCell>
+                        <div>
+                          <div className="font-medium">{rental.customerName}</div>
+                          <div className="text-sm text-gray-500">{rental.customerPhone}</div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <div>{rental.items?.[0]?.equipmentName || "No equipment"}</div>
+                          <div className="text-sm text-gray-500">
+                            {rental.items?.length > 1
+                              ? `+${rental.items.length - 1} more items`
+                              : `Qty: ${rental.items?.[0]?.quantity || 0}`}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        {rental.items?.[0]?.duration || 0}{" "}
+                        {rental.items?.[0]?.rateType === "daily" ? "days" : rental.items?.[0]?.rateType || ""}
+                      </TableCell>
+                      <TableCell>{formatCurrency(rental.totalAmount)}</TableCell>
+                      <TableCell>
+                        <Badge className={getStatusColor(rental.status)}>{rental.status}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <div className="text-sm">Expected: {formatDate(rental.expectedReturnDate)}</div>
+                          {rental.actualReturnDate && (
+                            <div className="text-sm text-green-600">
+                              Returned: {formatDate(rental.actualReturnDate)}
+                            </div>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <code className="text-xs bg-gray-100 px-2 py-1 rounded">{rental.qrCode}</code>
+                          <Button variant="ghost" size="sm">
+                            <QrCode className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Button variant="ghost" size="sm">
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" asChild>
+                            <Link href={`/dashboard/rentals/${rental.id}/invoice`}>
+                              <FileText className="h-4 w-4" />
+                            </Link>
+                          </Button>
+                          {rental.status === "active" && (
+                            <Button variant="ghost" size="sm" onClick={() => handleReturnItem(rental.id)}>
+                              <RotateCcw className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
