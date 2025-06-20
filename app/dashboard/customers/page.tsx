@@ -36,7 +36,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { getCustomersList, createCustomer, searchCustomersByTerm } from "@/lib/database-operations"
+import { fetchCustomers, createCustomer } from "@/lib/api-client"
 import { formatCurrency, formatDate, getStatusColor } from "@/lib/utils"
 import type { Customer } from "@/lib/types"
 
@@ -59,7 +59,7 @@ export default function CustomersPage() {
   const loadCustomers = async () => {
     try {
       setIsLoading(true)
-      const data = await getCustomersList()
+      const data = await fetchCustomers()
       setCustomers(data)
     } catch (error) {
       console.error("Error loading customers:", error)
@@ -77,7 +77,7 @@ export default function CustomersPage() {
     setSearchTerm(term)
     if (term.trim()) {
       try {
-        const results = await searchCustomersByTerm(term)
+        const results = await fetchCustomers(term)
         setCustomers(results)
       } catch (error) {
         console.error("Error searching customers:", error)

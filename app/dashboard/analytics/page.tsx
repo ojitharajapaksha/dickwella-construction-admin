@@ -19,8 +19,8 @@ import {
   Loader2,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { getAnalyticsData } from "@/lib/database-operations"
 import { formatCurrency } from "@/lib/utils"
+import { fetchAnalytics } from "@/lib/api-client"
 
 const COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6"]
 
@@ -37,7 +37,7 @@ export default function AnalyticsPage() {
   const loadAnalytics = async () => {
     try {
       setIsLoading(true)
-      const data = await getAnalyticsData()
+      const data = await fetchAnalytics()
       setAnalytics(data)
     } catch (error) {
       console.error("Error loading analytics:", error)

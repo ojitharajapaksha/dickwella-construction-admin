@@ -33,7 +33,7 @@ import {
   Loader2,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { getEquipmentList, createEquipment, searchEquipmentByTerm, generateQRCode } from "@/lib/database-operations"
+import { fetchEquipment, createEquipment, generateQRCode } from "@/lib/api-client"
 import { formatCurrency } from "@/lib/utils"
 import type { Equipment } from "@/lib/types"
 
@@ -74,7 +74,7 @@ export default function EquipmentPage() {
   const loadEquipment = async () => {
     try {
       setIsLoading(true)
-      const data = await getEquipmentList()
+      const data = await fetchEquipment()
       setEquipment(data)
     } catch (error) {
       console.error("Error loading equipment:", error)
@@ -92,7 +92,7 @@ export default function EquipmentPage() {
     setSearchTerm(term)
     if (term.trim()) {
       try {
-        const results = await searchEquipmentByTerm(term)
+        const results = await fetchEquipment(term)
         setEquipment(results)
       } catch (error) {
         console.error("Error searching equipment:", error)
