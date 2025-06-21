@@ -28,26 +28,37 @@ export async function GET(request: NextRequest) {
       params.push(searchPattern, searchPattern, searchPattern, searchPattern)
     }
 
-    query += ` ORDER BY r.created_at DESC`
+    query += ` ORDER BY r.created_at DESC LIMIT 50` // Limit for performance
 
     const results = (await executeQuery(query, params)) as any[]
 
-    // Get rental items for each rental
-    for (const rental of results) {
+    if (results.length === 0) {
+      return NextResponse.json([])
+    }
+
+    // Fetch all rental items in one query
+    const rentalIds = results.map(r => r.id)
+    let items: any[] = []
+    if (rentalIds.length > 0) {
+      const placeholders = rentalIds.map(() => '?').join(',')
       const itemsQuery = `
         SELECT 
-          equipment_id as equipmentId, equipment_name as equipmentName,
+          rental_id, equipment_id as equipmentId, equipment_name as equipmentName,
           quantity, rate_type as rateType, rate, duration, subtotal
         FROM rental_items 
-        WHERE rental_id = ?
+        WHERE rental_id IN (${placeholders})
       `
-      const items = await executeQuery(itemsQuery, [rental.id])
-      rental.items = items
+      items = await executeQuery(itemsQuery, rentalIds) as any[]
+    }
+
+    // Attach items to their rentals
+    for (const rental of results) {
+      rental.items = items.filter(item => item.rental_id === rental.id)
     }
 
     return NextResponse.json(results)
   } catch (error) {
-    console.error("Rentals API error:", error)
+    console.error("Rentals API error:", error instanceof Error ? error.stack : error)
     return NextResponse.json({ error: "Failed to fetch rentals" }, { status: 500 })
   }
 }
@@ -133,7 +144,7 @@ export async function POST(request: NextRequest) {
       throw error
     }
   } catch (error) {
-    console.error("Rental creation error:", error)
+    console.error("Rental creation error:", error instanceof Error ? error.stack : error)
     return NextResponse.json({ error: "Failed to create rental" }, { status: 500 })
   }
 }
